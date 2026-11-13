@@ -30,6 +30,7 @@
 #include "reader/RemoteTurnGate.h"
 #include "settings/OpdsServerListActivity.h"
 #include "settings/SettingsListActivity.h"
+#include "today/TodayActivity.h"
 #include "util/BmpViewerActivity.h"
 #include "util/FrontlightPanelActivity.h"
 #include "util/FullScreenMessageActivity.h"
@@ -301,6 +302,15 @@ void ActivityManager::goToFileBrowser(std::string path) {
   replaceActivity(std::make_unique<FileBrowserActivity>(renderer, mappedInput, std::move(path)));
 }
 
+void ActivityManager::goToToday() {
+  auto activity = makeUniqueNoThrow<TodayActivity>(renderer, mappedInput);
+  if (!activity) {
+    LOG_ERR("ACT", "OOM: today activity");
+    return;
+  }
+  replaceActivity(std::move(activity));
+}
+
 void ActivityManager::goToLibrary() {
   auto activity = makeUniqueNoThrow<LibraryListActivity>(renderer, mappedInput);
   if (!activity) {
@@ -361,7 +371,9 @@ void ActivityManager::goToFullScreenMessage(std::string message, EpdFontFamily::
 void ActivityManager::goHome(HomeMenuItem initialMenuItem, bool cleanInitialRefresh) {
   if (initialMenuItem == HomeMenuItem::NONE && currentActivity) {
     const auto& activityName = currentActivity->name;
-    if (activityName == "FileBrowser") {
+    if (activityName == "Today") {
+      initialMenuItem = HomeMenuItem::TODAY;
+    } else if (activityName == "FileBrowser") {
       initialMenuItem = HomeMenuItem::FILE_BROWSER;
     } else if (activityName == "Library") {
       initialMenuItem = HomeMenuItem::LIBRARY;
