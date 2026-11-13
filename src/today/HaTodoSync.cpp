@@ -27,11 +27,89 @@ int request(const TodayConfig& config, const char* method, const std::string& pa
   return status;
 }
 
+int callService(const TodayConfig& config, const char* service, const JsonDocument& data) {
+  std::string payload, body;
+  serializeJson(data, payload);
+  return request(config, "POST", std::string("/api/services/todo/") + service, payload, body);
+}
+
 SyncResult httpError(const char* step, int status) {
   LOG_ERR("TODAY", "%s failed: HTTP %d", step, status);
   if (status == 401) return {false, "Token rejected (401)"};
   if (status <= 0) return {false, "Home Assistant unreachable"};
   return {false, std::string(step) + " failed (HTTP " + std::to_string(status) + ")"};
+}
+
+// 400 means the item no longer exists remotely: drop the change so it cannot
+// block every later sync.
+bool accepted(const int status, const char* what, const TodayTask& task) {
+  if (status == 400) {
+    LOG_INF("TODAY", "Dropped %s for missing item %s", what, task.uid.c_str());
+    return true;
+  }
+  return status == 200;
+}
+
+int removeItem(const TodayConfig& config, const std::string& listId, const std::string& uid) {
+  JsonDocument data;
+  data["entity_id"] = listId;
+  data["item"] = uid;
+  return callService(config, "remove_item", data);
+}
+
+// The remote item is replaced, so Home Assistant assigns a new uid; the
+// following fetch picks it up. Adds before removing: a failure in between
+// leaves a duplicate rather than losing the task.
+int moveItem(const TodayConfig& config, const std::string& listId, const TodayTask& task) {
+  JsonDocument add;
+  add["entity_id"] = listId;
+  add["item"] = task.title;
+  if (!task.due.empty()) add["due_date"] = task.due;
+  if (const int status = callService(config, "add_item", add); status != 200) return status;
+  if (task.done) {
+    // New items start open; find it by title to restore the done state.
+    JsonDocument update;
+    update["entity_id"] = listId;
+    update["item"] = task.title;
+    update["status"] = "completed";
+    if (const int status = callService(config, "update_item", update); status != 200) return status;
+  }
+  return removeItem(config, task.movedFrom, task.uid);
+}
+
+int updateItem(const TodayConfig& config, const std::string& listId, const TodayTask& task) {
+  JsonDocument data;
+  data["entity_id"] = listId;
+  data["item"] = task.uid;
+  if (task.dirty) data["status"] = task.done ? "completed" : "needs_action";
+  if (task.dueDirty) {
+    if (task.due.empty()) {
+      data["due_date"] = nullptr;  // clears the due date
+    } else {
+      data["due_date"] = task.due;
+    }
+  }
+  return callService(config, "update_item", data);
+}
+
+SyncResult pushChanges(const TodayConfig& config, std::vector<TodayList>& lists) {
+  for (auto& list : lists) {
+    for (auto& task : list.tasks) {
+      if (!task.pending()) continue;
+      int status;
+      if (task.deleted) {
+        status = removeItem(config, task.movedFrom.empty() ? list.id : task.movedFrom, task.uid);
+      } else if (!task.movedFrom.empty()) {
+        status = moveItem(config, list.id, task);
+      } else {
+        status = updateItem(config, list.id, task);
+      }
+      if (!accepted(status, "change", task)) return httpError("Sending", status);
+      task.dirty = task.dueDirty = false;
+      task.movedFrom.clear();
+    }
+  }
+  return {true, ""};
 }
 
 std::string getItemsBody(const std::string& entityId) {
@@ -44,29 +122,6 @@ std::string getItemsBody(const std::string& entityId) {
   std::string out;
   serializeJson(doc, out);
   return out;
-}
-
-SyncResult pushDirty(const TodayConfig& config, std::vector<TodayList>& lists) {
-  for (auto& list : lists) {
-    for (auto& task : list.tasks) {
-      if (!task.dirty) continue;
-      JsonDocument doc;
-      doc["entity_id"] = list.id;
-      doc["item"] = task.uid;
-      doc["status"] = task.done ? "completed" : "needs_action";
-      std::string payload, body;
-      serializeJson(doc, payload);
-      const int status = request(config, "POST", "/api/services/todo/update_item", payload, body);
-      // 400: the item no longer exists remotely; drop the change so it cannot block every sync.
-      if (status == 400) {
-        LOG_INF("TODAY", "Dropped change for missing item %s in %s", task.uid.c_str(), list.id.c_str());
-      } else if (status != 200) {
-        return httpError("Sending", status);
-      }
-      task.dirty = false;
-    }
-  }
-  return {true, ""};
 }
 
 std::string fetchTitle(const TodayConfig& config, const std::string& entityId) {
@@ -92,6 +147,7 @@ SyncResult fetchList(const TodayConfig& config, const std::string& entityId, siz
   item["uid"] = true;
   item["summary"] = true;
   item["status"] = true;
+  item["due"] = true;
   JsonDocument doc;
   if (const auto err = deserializeJson(doc, body, DeserializationOption::Filter(filter))) {
     LOG_ERR("TODAY", "Bad get_items response: %s", err.c_str());
@@ -102,8 +158,12 @@ SyncResult fetchList(const TodayConfig& config, const std::string& entityId, siz
   for (JsonObjectConst obj : doc["service_response"][entityId]["items"].as<JsonArrayConst>()) {
     const char* summary = obj["summary"] | "";
     if (!*summary) continue;
-    const bool done = std::strcmp(obj["status"] | "", "completed") == 0;
-    out.tasks.push_back({obj["uid"] | "", clampTitle(summary), done});
+    TodayTask task;
+    task.uid = obj["uid"] | "";
+    task.title = clampTitle(summary);
+    task.due = std::string(obj["due"] | "").substr(0, DATE_LEN);  // datetimes keep their date
+    task.done = std::strcmp(obj["status"] | "", "completed") == 0;
+    out.tasks.push_back(std::move(task));
   }
   // Open tasks first, as in Home Assistant's own list view; the budget then trims completed ones.
   std::stable_partition(out.tasks.begin(), out.tasks.end(), [](const TodayTask& t) { return !t.done; });
@@ -115,7 +175,7 @@ SyncResult fetchList(const TodayConfig& config, const std::string& entityId, siz
 }  // namespace
 
 SyncResult syncWithHomeAssistant(const TodayConfig& config, std::vector<TodayList>& lists) {
-  if (auto result = pushDirty(config, lists); !result.ok) return result;
+  if (auto result = pushChanges(config, lists); !result.ok) return result;
 
   std::vector<TodayList> fresh;
   fresh.reserve(config.listIds.size());
