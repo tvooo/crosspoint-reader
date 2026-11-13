@@ -4,6 +4,9 @@
 #include <Logging.h>
 #include <SecureHttpClient.h>
 
+#include <algorithm>
+#include <cstring>
+
 namespace today {
 namespace {
 
@@ -31,9 +34,13 @@ SyncResult httpError(const char* step, int status) {
   return {false, std::string(step) + " failed (HTTP " + std::to_string(status) + ")"};
 }
 
-std::string entityBody(const std::string& entityId) {
+std::string getItemsBody(const std::string& entityId) {
   JsonDocument doc;
   doc["entity_id"] = entityId;
+  // Explicit: the REST default differs from the documented needs_action default.
+  JsonArray status = doc["status"].to<JsonArray>();
+  status.add("needs_action");
+  status.add("completed");
   std::string out;
   serializeJson(doc, out);
   return out;
@@ -76,14 +83,15 @@ std::string fetchTitle(const TodayConfig& config, const std::string& entityId) {
 
 SyncResult fetchList(const TodayConfig& config, const std::string& entityId, size_t& taskBudget, TodayList& out) {
   std::string body;
-  // Default status filter is needs_action, so completed items drop off.
-  const int status = request(config, "POST", "/api/services/todo/get_items?return_response", entityBody(entityId), body);
+  const int status =
+      request(config, "POST", "/api/services/todo/get_items?return_response", getItemsBody(entityId), body);
   if (status != 200) return httpError("Loading", status);
 
   JsonDocument filter;
   JsonObject item = filter["service_response"][entityId]["items"].add<JsonObject>();
   item["uid"] = true;
   item["summary"] = true;
+  item["status"] = true;
   JsonDocument doc;
   if (const auto err = deserializeJson(doc, body, DeserializationOption::Filter(filter))) {
     LOG_ERR("TODAY", "Bad get_items response: %s", err.c_str());
@@ -92,12 +100,15 @@ SyncResult fetchList(const TodayConfig& config, const std::string& entityId, siz
 
   out = {entityId, fetchTitle(config, entityId), {}};
   for (JsonObjectConst obj : doc["service_response"][entityId]["items"].as<JsonArrayConst>()) {
-    if (taskBudget == 0) break;
     const char* summary = obj["summary"] | "";
     if (!*summary) continue;
-    out.tasks.push_back({obj["uid"] | "", clampTitle(summary)});
-    --taskBudget;
+    const bool done = std::strcmp(obj["status"] | "", "completed") == 0;
+    out.tasks.push_back({obj["uid"] | "", clampTitle(summary), done});
   }
+  // Open tasks first, as in Home Assistant's own list view; the budget then trims completed ones.
+  std::stable_partition(out.tasks.begin(), out.tasks.end(), [](const TodayTask& t) { return !t.done; });
+  if (out.tasks.size() > taskBudget) out.tasks.resize(taskBudget);
+  taskBudget -= out.tasks.size();
   return {true, ""};
 }
 
