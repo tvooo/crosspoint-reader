@@ -1038,6 +1038,17 @@ void GfxRenderer::drawPixelDither<Color::DarkGray>(const int x, const int y) con
   drawPixel(x, y, (x + y) % 2 == 0);  // TODO: maybe find a better pattern?
 }
 
+void GfxRenderer::drawTextDither(const int fontId, const int x, const int y, const char* text, const Color color,
+                                 const EpdFontFamily::Style style) const {
+  drawText(fontId, x, y, text, true, style);
+  if (color == Color::Black || text == nullptr || *text == '\0') return;
+  const int width = getTextWidth(fontId, text, style);
+  fillRectDither(x, y, width, getLineHeight(fontId), color, DitherMode::MaskInk);
+  // Fork-specific: gray labels mark finished items, so they are struck through.
+  const int ascender = getFontAscenderSize(fontId);
+  fillRectDither(x, y + ascender - ascender / 3, width, 2, Color::DarkGray);
+}
+
 void GfxRenderer::fillRectDither(const int x, const int y, const int width, const int height, Color color,
                                  const DitherMode mode) const {
   if (mode == DitherMode::PreserveInk && color == Color::White) return;
@@ -1213,6 +1224,14 @@ void GfxRenderer::fillRectImpl(const int x, const int y, const int width, const 
             if (byte == byteStart) mask &= headMask;
             if (byte == byteEnd) mask &= tailMask;
             row[byte] &= static_cast<uint8_t>(~mask);
+          }
+          continue;
+        case DitherMode::MaskInk:
+          for (int byte = byteStart; byte <= byteEnd; ++byte) {
+            uint8_t mask = whiteMask;
+            if (byte == byteStart) mask &= headMask;
+            if (byte == byteEnd) mask &= tailMask;
+            row[byte] |= mask;
           }
           continue;
         case DitherMode::Replace:

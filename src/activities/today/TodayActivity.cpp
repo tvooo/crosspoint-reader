@@ -12,6 +12,35 @@
 
 namespace fui = freeink::ui;
 
+namespace {
+
+// The theme's list row styles as FreeInkApp would expand them, but with done
+// rows' text in solid dark gray: the default dithered disabled foreground only
+// grays the checkbox, since list labels take solid colors only.
+void applyRowStyles(const fui::ThemeTokens& theme, fui::ListProps& props) {
+  fui::StyleSet styles = theme.listRow.unset() ? fui::defaultListRowStyles() : theme.listRow;
+  switch (theme.listSelectionStyle) {
+    case fui::SelectionStyle::LightPill:
+      styles.selected.background = fui::Paint::dither(fui::Color::LightGray);
+      styles.selected.foreground = fui::Paint::solid(fui::Color::Black);
+      styles.active = styles.selected;
+      break;
+    case fui::SelectionStyle::Underline:
+    case fui::SelectionStyle::Triangle:
+      styles.selected = styles.normal;
+      props.selectionMarker = theme.listSelectionStyle == fui::SelectionStyle::Underline
+                                  ? fui::SelectionMarker::Underline
+                                  : fui::SelectionMarker::Triangle;
+      break;
+    default:
+      break;
+  }
+  styles.disabled.foreground = fui::Paint::solid(fui::Color::DarkGray);
+  props.rowStyles = styles;
+}
+
+}  // namespace
+
 void TodayActivity::onEnter() {
   UiListActivity::onEnter();
 
@@ -43,16 +72,32 @@ void TodayActivity::rebuildRows() {
   sync.actionValue = SYNC_ROW;
   rowItems.push_back(sync);
 
+  // Open tasks under their list, then every done task in one Done group.
+  const auto addRow = [this](const size_t l, const size_t t, const char* heading) {
+    fui::ListItem item;
+    item.label = lists[l].tasks[t].title.c_str();
+    item.sectionHeading = heading;
+    item.actionValue = static_cast<int16_t>(rowItems.size());
+    rowItems.push_back(item);
+    rowTask.emplace_back(static_cast<uint8_t>(l), static_cast<uint8_t>(t));
+  };
   for (size_t l = 0; l < lists.size(); ++l) {
+    const char* heading = lists[l].title.c_str();
     for (size_t t = 0; t < lists[l].tasks.size(); ++t) {
-      fui::ListItem item;
-      item.label = lists[l].tasks[t].title.c_str();
-      if (t == 0) item.sectionHeading = lists[l].title.c_str();
-      item.actionValue = static_cast<int16_t>(rowItems.size());
-      rowItems.push_back(item);
-      rowTask.emplace_back(static_cast<uint8_t>(l), static_cast<uint8_t>(t));
+      if (lists[l].tasks[t].done) continue;
+      addRow(l, t, heading);
+      heading = nullptr;
     }
   }
+  const char* doneHeading = tr(STR_TODAY_DONE);
+  for (size_t l = 0; l < lists.size(); ++l) {
+    for (size_t t = 0; t < lists[l].tasks.size(); ++t) {
+      if (!lists[l].tasks[t].done) continue;
+      addRow(l, t, doneHeading);
+      doneHeading = nullptr;
+    }
+  }
+  if (nav.selected >= listCount()) nav.selected = listCount() - 1;
   updateSyncSubtitle();
 }
 
@@ -97,7 +142,8 @@ void TodayActivity::activateIndex(const int index) {
     TodayTask& task = taskAt(index);
     task.done = !task.done;
     task.dirty = !task.dirty;  // toggling back cancels the pending change
-    updateSyncSubtitle();
+    // The task moves group; the selection stays put, landing on the next task.
+    rebuildRows();
   }
   if (!today::save(lists)) LOG_ERR("TODAY", "Failed to save task state");
   requestUpdate();
@@ -164,7 +210,11 @@ void TodayActivity::buildScreen(UiScreen& screen) {
   }
 
   for (size_t row = 1; row < rowItems.size(); ++row) {
-    GUI.setCheckboxRow(rowItems[row], taskAt(static_cast<int>(row)).done);
+    const bool done = taskAt(static_cast<int>(row)).done;
+    GUI.setCheckboxRow(rowItems[row], done);
+    // Dimming is visual only; rows stay tappable. Disabled styling would hide
+    // the selection highlight, so the selected row is drawn normally.
+    rowItems[row].state = done && static_cast<int>(row) != nav.selected ? fui::StateDisabled : fui::StateNormal;
   }
 
   fui::ListProps props;
@@ -172,6 +222,7 @@ void TodayActivity::buildScreen(UiScreen& screen) {
   props.count = static_cast<uint16_t>(rowItems.size());
   props.action = ACTION_ROW;
   props.inputMask = fui::InputTouch;  // physical buttons stay in loop()
+  applyRowStyles(screen.theme(), props);
   syncListViewport(screen, props);
   screen.list(props);
 }

@@ -35,7 +35,8 @@ enum Color : uint8_t { Clear = 0x00, White = 0x01, LightGray = 0x05, DarkGray = 
 class GfxRenderer {
  public:
   enum RenderMode { BW, GRAYSCALE_LSB, GRAYSCALE_MSB };
-  enum class DitherMode { Replace, PreserveInk };
+  // MaskInk keeps existing ink only where the pattern is ink; it never adds ink.
+  enum class DitherMode { Replace, PreserveInk, MaskInk };
 
   // Logical screen orientation from the perspective of callers
   enum Orientation {
@@ -352,6 +353,10 @@ class GfxRenderer {
   void drawText(int fontId, int x, int y, const char* text, bool black = true,
                 EpdFontFamily::Style style = EpdFontFamily::REGULAR,
                 BidiUtils::BidiBaseDir baseDir = BidiUtils::BidiBaseDir::AUTO, int8_t tracking = 0) const;
+  // Gray, struck-through text: black text thinned to the color's dither
+  // pattern. Used by FreeInkUI for labels with a solid gray foreground.
+  void drawTextDither(int fontId, int x, int y, const char* text, Color color,
+                      EpdFontFamily::Style style = EpdFontFamily::REGULAR) const;
   // Draws one glyph at scale256/256 of its size with its baseline at baselineY (drop caps).
   // Outlines are bilinearly resampled from the font bitmap, so no larger font is loaded.
   // Returns the scaled advance in pixels.
