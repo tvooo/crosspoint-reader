@@ -34,9 +34,7 @@ int HomeActivity::getMenuItemCount() const {
   if (slotItem() != HomeMenuItem::NONE) {
     count++;
   }
-  if (hasTodayEntry()) {
-    count++;
-  }
+  count += appEntryCount();
   return count;
 }
 
@@ -261,13 +259,14 @@ void HomeActivity::onEnter() {
   }
 
   const auto base = static_cast<int>(recentBooks.size());
-  const int todayOffset = hasTodayEntry() ? 1 : 0;
   if (initialMenuItem == HomeMenuItem::NONE) {
     selectorIndex = 0;
   } else if (initialMenuItem == HomeMenuItem::TODAY) {
     selectorIndex = base;
+  } else if (initialMenuItem == HomeMenuItem::DASHBOARD) {
+    selectorIndex = base + 1;
   } else {
-    selectorIndex = base + todayOffset + menuItemToIndex(initialMenuItem, slotItem());
+    selectorIndex = base + appEntryCount() + menuItemToIndex(initialMenuItem, slotItem());
   }
 
   // Trigger first update
@@ -330,13 +329,11 @@ void HomeActivity::loop() {
       return;
     }
     int menuIndex = selectorIndex - static_cast<int>(recentBooks.size());
-    if (hasTodayEntry()) {
-      if (menuIndex == 0) {
-        onTodayOpen();
-        return;
-      }
-      --menuIndex;
+    if (menuIndex < appEntryCount()) {
+      menuIndex == 0 ? onTodayOpen() : onDashboardOpen();
+      return;
     }
+    menuIndex -= appEntryCount();
     switch (indexToMenuItem(menuIndex, slotItem())) {
       case HomeMenuItem::FILE_BROWSER:
         onFileBrowserOpen();
@@ -575,8 +572,8 @@ void HomeActivity::render(RenderLock&&) {
     menuIcons.insert(menuIcons.begin() + 2, hasPlugins ? Plugins : Book);
   }
 
-  menuItems.insert(menuItems.begin(), tr(STR_TODAY));
-  menuIcons.insert(menuIcons.begin(), Recent);
+  menuItems.insert(menuItems.begin(), {tr(STR_TODAY), tr(STR_HOUSE)});
+  menuIcons.insert(menuIcons.begin(), {Recent, Blocks});
 
   if (metrics.homeContinueReadingInMenu && !recentBooks.empty()) {
     // Insert Continue Reading at the top if enabled in theme
@@ -621,6 +618,8 @@ void HomeActivity::onSettingsOpen() { activityManager.goToSettings(); }
 void HomeActivity::onFileTransferOpen() { activityManager.goToFileTransfer(); }
 
 void HomeActivity::onTodayOpen() { activityManager.goToToday(); }
+
+void HomeActivity::onDashboardOpen() { activityManager.goToDashboard(); }
 
 void HomeActivity::onOpdsBrowserOpen() { activityManager.goToBrowser(); }
 

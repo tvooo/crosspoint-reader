@@ -16,6 +16,7 @@
 #include "HapticFeedback.h"
 #include "OpdsServerStore.h"
 #include "boot_sleep/BootActivity.h"
+#include "dashboard/DashboardActivity.h"
 #include "boot_sleep/SleepActivity.h"
 #include "browser/OpdsBookBrowserActivity.h"
 #include "components/HeaderBackTapTarget.h"
@@ -311,6 +312,15 @@ void ActivityManager::goToToday() {
   replaceActivity(std::move(activity));
 }
 
+void ActivityManager::goToDashboard() {
+  auto activity = makeUniqueNoThrow<DashboardActivity>(renderer, mappedInput);
+  if (!activity) {
+    LOG_ERR("ACT", "OOM: dashboard activity");
+    return;
+  }
+  replaceActivity(std::move(activity));
+}
+
 void ActivityManager::goToLibrary() {
   auto activity = makeUniqueNoThrow<LibraryListActivity>(renderer, mappedInput);
   if (!activity) {
@@ -373,6 +383,8 @@ void ActivityManager::goHome(HomeMenuItem initialMenuItem, bool cleanInitialRefr
     const auto& activityName = currentActivity->name;
     if (activityName == "Today") {
       initialMenuItem = HomeMenuItem::TODAY;
+    } else if (activityName == "Dashboard") {
+      initialMenuItem = HomeMenuItem::DASHBOARD;
     } else if (activityName == "FileBrowser") {
       initialMenuItem = HomeMenuItem::FILE_BROWSER;
     } else if (activityName == "Library") {

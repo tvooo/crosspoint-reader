@@ -26,8 +26,9 @@ class HomeActivity final : public Activity {
     if (hasPlugins) return HomeMenuItem::PLUGINS;
     return hasOpdsServers ? HomeMenuItem::OPDS_BROWSER : HomeMenuItem::NONE;
   }
-  // Today leads the classic menu; the cover grid's tabs have no slot for it.
-  bool hasTodayEntry() const { return !coverGridUi; }
+  // Today and House lead the classic menu; the cover grid's tabs have no slot for them.
+  static constexpr int APP_ENTRIES = 2;
+  int appEntryCount() const { return coverGridUi ? 0 : APP_ENTRIES; }
   bool hasContinueReading = false;
   bool coverRendered = false;      // Track if cover has been rendered once
   bool coverBufferStored = false;  // Track if cover buffer is stored
@@ -75,6 +76,7 @@ class HomeActivity final : public Activity {
   }
   void onRecentBookSelected(const std::string& path);
   void onTodayOpen();
+  void onDashboardOpen();
   void onFileBrowserOpen();
   void onLibraryOpen();
   void onSettingsOpen();
