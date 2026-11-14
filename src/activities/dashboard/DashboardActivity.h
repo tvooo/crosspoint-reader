@@ -6,9 +6,9 @@
 #include "activities/UiTabListActivity.h"
 #include "dashboard/Dashboard.h"
 
-// Home Assistant values in tabs from ha-dashboard.json, shown from the cache
-// until the Sync row fetches new ones. Toggle rows queue a switch for the
-// next sync.
+// Home Assistant values in tabs from ha-dashboard.json, drawn as tiles from
+// the cache until the Sync row fetches new ones. Only Sync and toggle rows
+// are selectable; a toggle queues a switch for the next sync.
 class DashboardActivity final : public UiTabListActivity {
  public:
   DashboardActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
@@ -18,7 +18,7 @@ class DashboardActivity final : public UiTabListActivity {
   void onExit() override;
 
  private:
-  // Row 0 is Sync; others point at a layout row.
+  // Row 0 is Sync; others point at a toggle row of the layout.
   struct RowRef {
     uint8_t section = 0;
     uint8_t row = 0;
@@ -54,9 +54,8 @@ class DashboardActivity final : public UiTabListActivity {
   bool wifiUsed = false;
   std::string syncError;
 
-  // Rows point into `tabs` and the strings below; rebuilt with rebuildRows().
+  // Rows point into `tabs` and syncSubtitle; rebuilt with rebuildRows().
   std::vector<freeink::ui::ListItem> rowItems;
   std::vector<RowRef> rowRefs;
-  std::vector<std::string> rowValues;
   std::string syncSubtitle;
 };

@@ -7,6 +7,7 @@
 
 #include <ctime>
 
+#include "DashboardTiles.h"
 #include "I18nKeys.h"
 #include "SilentRestart.h"
 #include "activities/network/WifiSelectionActivity.h"
@@ -79,36 +80,24 @@ const dashboard::Row& DashboardActivity::layoutRow(const RowRef& ref) const {
 void DashboardActivity::rebuildRows() {
   rowItems.clear();
   rowRefs.clear();
-  rowValues.clear();
 
   fui::ListItem sync;
   sync.label = tr(STR_TODAY_SYNC);
   rowItems.push_back(sync);
   rowRefs.push_back({});
 
+  // Only toggles are selectable; everything else is drawn as tiles.
   if (!tabs.empty()) {
     const auto& sections = tabs[static_cast<size_t>(tab)].sections;
-    // Values first: rowItems keep pointers into rowValues.
-    for (const auto& section : sections) {
-      for (const auto& row : section.rows) rowValues.push_back(row.toggle ? "" : dashboard::rowText(row, cache));
-    }
-    size_t valueIndex = 0;
     for (size_t s = 0; s < sections.size(); ++s) {
-      const char* heading = sections[s].title.empty() ? nullptr : sections[s].title.c_str();
       for (size_t r = 0; r < sections[s].rows.size(); ++r) {
         const dashboard::Row& row = sections[s].rows[r];
+        if (!row.toggle) continue;
         fui::ListItem item;
         item.label = row.label.c_str();
-        item.sectionHeading = heading;
-        heading = nullptr;
         item.actionValue = static_cast<int16_t>(rowItems.size());
-        if (row.toggle) {
-          GUI.setCheckboxRow(item, cache.toggleIsOn(row.entities[0]));
-          if (cache.isPending(row.entities[0])) item.subtitle = tr(STR_DASH_PENDING_TOGGLE);
-        } else {
-          item.value = rowValues[valueIndex].c_str();
-        }
-        ++valueIndex;
+        GUI.setCheckboxRow(item, cache.toggleIsOn(row.entities[0]));
+        if (cache.isPending(row.entities[0])) item.subtitle = tr(STR_DASH_PENDING_TOGGLE);
         rowItems.push_back(item);
         rowRefs.push_back({static_cast<uint8_t>(s), static_cast<uint8_t>(r)});
       }
@@ -187,7 +176,6 @@ void DashboardActivity::activateIndex(const int index) {
     return;
   }
   const dashboard::Row& row = layoutRow(rowRefs[static_cast<size_t>(index)]);
-  if (!row.toggle) return;
   {
     RenderLock lock(*this);
     cache.flipToggle(row.entities[0]);
@@ -268,5 +256,16 @@ void DashboardActivity::buildScreen(UiScreen& screen) {
   props.action = ACTION_ROW;
   props.inputMask = fui::InputTouch;  // physical buttons stay in loop()
   syncTabListViewport(screen, props);
-  screen.list(props);
+  // The list takes only its rows' height; the tiles get the rest.
+  const int16_t listHeight = static_cast<int16_t>(fui::listContentHeight(
+      screen.target(), screen.frame().assets(), screen.contentRect(), screen.resolveListProps(props)));
+  screen.list(props, listHeight);
+  if (tabs.empty()) return;
+
+  screen.spacer(static_cast<int16_t>(metrics.verticalSpacing));
+  const auto side = static_cast<int16_t>(metrics.contentSidePadding);
+  fui::Rect tiles = screen.contentRect();
+  tiles.x = static_cast<int16_t>(tiles.x + side);
+  tiles.width = static_cast<int16_t>(tiles.width - 2 * side);
+  dashboard_tiles::drawTab(screen, tiles, tabs[static_cast<size_t>(tab)], cache);
 }

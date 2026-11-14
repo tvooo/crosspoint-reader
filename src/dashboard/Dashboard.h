@@ -9,13 +9,18 @@
 
 // A read-mostly Home Assistant dashboard. The layout comes from
 // /.crosspoint/ha-dashboard.json:
-//   {"tabs":[{"title":"Energy","sections":[{"title":"Now","rows":[
-//     {"label":"Outside","entities":["sensor.outdoor_temperature","sensor.outdoor_humidity"]},
-//     {"label":"Fridge","entities":["sensor.fridge_energy"],"today":true},
-//     {"label":"Away","toggle":"input_boolean.away"}]}]}]}
-// A row shows its entities' values joined with " · ". A "today" row shows
-// how much each meter grew since local midnight. A toggle row switches one
-// input_boolean; nothing else can be switched.
+//   {"tabs":[{"title":"Energy","sections":[
+//     {"title":"Now","rows":[
+//       {"label":"Outside","entities":["sensor.outdoor_temperature","sensor.outdoor_humidity"]},
+//       {"label":"Away","toggle":"input_boolean.away"}]},
+//     {"title":"Devices","style":"breakdown","total":"sensor.energy_today","rows":[
+//       {"label":"Fridge","entities":["sensor.fridge_energy"],"today":true}]}]}]}
+// Section styles: "cards" (default; a tile per row, first entity large),
+// "breakdown" (a stacked bar of each row's first entity, biggest first, with
+// "Other" up to `total`; "totalToday": true when it is a meter) and "rows"
+// (label and values). A "today" row shows how much each meter grew since
+// local midnight. A toggle row switches one input_boolean; nothing else can
+// be switched.
 namespace dashboard {
 
 constexpr const char* LAYOUT_PATH = "/.crosspoint/ha-dashboard.json";
@@ -31,8 +36,13 @@ struct Row {
   bool today = false;   // show growth since midnight
 };
 
+enum class Style : uint8_t { Cards, Breakdown, Rows };
+
 struct Section {
   std::string title;
+  Style style = Style::Cards;
+  std::string total;        // breakdown only: entity the parts add up to
+  bool totalToday = false;  // total is a meter; use its growth since midnight
   std::vector<Row> rows;
 };
 
@@ -67,8 +77,35 @@ bool loadLayout(std::vector<Tab>& tabs);
 bool loadCache(Cache& cache);
 bool saveCache(const Cache& cache);
 
+// A display value split for layout, e.g. {"20.6", "°"}, {"923", "ppm"}.
+struct Reading {
+  std::string value;
+  std::string unit;
+
+  std::string text() const;  // "20.6°", "923 ppm"
+};
+
+// The row's `index`th entity; "–" when unknown.
+Reading reading(const Row& row, size_t index, const Cache& cache);
 // The row's values for display, e.g. "20.6° · 54% · 923 ppm".
 std::string rowText(const Row& row, const Cache& cache);
+// Like rowText, without the first entity.
+std::string restText(const Row& row, const Cache& cache);
+
+struct Slice {
+  const Row* row = nullptr;  // nullptr: the rest of the total ("Other")
+  double amount = 0;         // in `unit`
+  std::string unit;          // kWh for energy, W for power
+  Reading reading;
+};
+
+// `amount` in `unit` for display, e.g. 0.42 kWh -> {"420", "Wh"}.
+Reading formatAmount(double amount, const std::string& unit);
+
+// The section's rows as slices of one unit, biggest first, then "Other" (the
+// rest of `total`). Rows without a positive number in the first row's unit
+// are left out.
+std::vector<Slice> breakdown(const Section& section, const Cache& cache);
 
 struct SyncResult {
   bool ok = false;
