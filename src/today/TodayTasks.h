@@ -3,6 +3,8 @@
 #include <string>
 #include <vector>
 
+#include "ha/HaClient.h"
+
 // Tasks grouped by remote list, persisted as /.crosspoint/today.json:
 //   {"lists":[{"id":"todo.morning","title":"Morning",
 //              "tasks":[{"uid":"a1","title":"Water plants","due":"2026-11-14","done":false}]}]}
@@ -27,11 +29,10 @@ struct TodayList {
   std::vector<TodayTask> tasks;
 };
 
-// Home Assistant connection, read from /.crosspoint/today-ha.json:
-//   {"url":"http://192.168.1.20:8123","token":"<long-lived token>","lists":["todo.home","todo.errands"]}
+// Lists to show, read from /.crosspoint/today-ha.json: {"lists":["todo.home","todo.errands"]}.
+// The connection comes from ha.json.
 struct TodayConfig {
-  std::string url;
-  std::string token;
+  ha::Connection connection;
   std::vector<std::string> listIds;
 };
 
@@ -63,7 +64,7 @@ Bucket bucketOf(const TodayTask& task, const Dates& dates);
 bool load(std::vector<TodayList>& lists);
 bool save(const std::vector<TodayList>& lists);
 
-// False when the file is missing or lacks url, token, or lists.
+// False without a connection or without lists.
 bool loadConfig(TodayConfig& config);
 
 std::string clampTitle(const char* title);

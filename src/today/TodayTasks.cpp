@@ -125,18 +125,16 @@ bool save(const std::vector<TodayList>& lists) {
 
 bool loadConfig(TodayConfig& config) {
   config = {};
+  if (!ha::loadConnection(config.connection)) return false;
   JsonDocument doc;
   if (!PersistableStoreBase::readDocFromFile(CONFIG_PATH, doc)) return false;
 
-  config.url = doc["url"] | "";
-  while (!config.url.empty() && config.url.back() == '/') config.url.pop_back();
-  config.token = doc["token"] | "";
   for (JsonVariantConst id : doc["lists"].as<JsonArrayConst>()) {
     if (config.listIds.size() >= MAX_LISTS) break;
     const char* value = id | "";
     if (*value) config.listIds.emplace_back(value);
   }
-  return !config.url.empty() && !config.token.empty() && !config.listIds.empty();
+  return !config.listIds.empty();
 }
 
 }  // namespace today

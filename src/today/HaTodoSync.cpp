@@ -2,7 +2,6 @@
 
 #include <ArduinoJson.h>
 #include <Logging.h>
-#include <SecureHttpClient.h>
 
 #include <algorithm>
 #include <cstring>
@@ -10,35 +9,16 @@
 namespace today {
 namespace {
 
-constexpr uint32_t TIMEOUT_MS = 15000;
-
-// Returns the HTTP status (<= 0 when no response); the body goes to `body`.
 int request(const TodayConfig& config, const char* method, const std::string& path, const std::string& payload,
             std::string& body) {
-  freeink::SecureHttpClient http;
-  http.setInsecure();
-  http.setTimeout(TIMEOUT_MS);
-  if (!http.begin(config.url + path)) return -1;
-  http.addHeader("Authorization", "Bearer " + config.token);
-  http.addHeader("Content-Type", "application/json");
-  const int status = http.sendRequest(method, payload);
-  body = http.getString();
-  http.end();
-  return status;
+  return ha::request(config.connection, method, path, payload, body);
 }
 
 int callService(const TodayConfig& config, const char* service, const JsonDocument& data) {
-  std::string payload, body;
-  serializeJson(data, payload);
-  return request(config, "POST", std::string("/api/services/todo/") + service, payload, body);
+  return ha::callService(config.connection, "todo", service, data);
 }
 
-SyncResult httpError(const char* step, int status) {
-  LOG_ERR("TODAY", "%s failed: HTTP %d", step, status);
-  if (status == 401) return {false, "Token rejected (401)"};
-  if (status <= 0) return {false, "Home Assistant unreachable"};
-  return {false, std::string(step) + " failed (HTTP " + std::to_string(status) + ")"};
-}
+SyncResult httpError(const char* step, const int status) { return {false, ha::errorText(step, status)}; }
 
 // 400 means the item no longer exists remotely: drop the change so it cannot
 // block every later sync.
